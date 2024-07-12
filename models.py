@@ -35,4 +35,3 @@ class Product(Base):
         return f'''Product Name: {self.product_name}, "Quantity: {self.product_quantity}, 
         Price: {self.product_price}, Date Updated: {self.date_updated}, Brand ID: {self.brand_id}'''
 
-
