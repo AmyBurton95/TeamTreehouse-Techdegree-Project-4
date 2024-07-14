@@ -1,5 +1,5 @@
 import csv
-import datetime
+from datetime import datetime
 
 from sqlalchemy import func
 from models import Base, session, engine, Brands, Product
@@ -46,16 +46,28 @@ def add_inventory_csv():
         data = csv.reader(csvfile)
         next(data)
         for row in data:
-            product_in_db = session.query(Product).filter(Product.product_name == row[0]).one_or_none()
-            if product_in_db is None:
-                product_name = row[0]
-                product_price = clean_db_price(row[1])
-                product_quantity = row[2]
-                date_updated = clean_db_date(row[3])
-                brand_name = row[4]
-                brand = session.query(Brands).filter(Brands.brand_name == brand_name).one_or_none()
-                new_product = Product(product_name=product_name, product_quantity=product_quantity,
-                                      product_price=product_price, date_updated=date_updated, brand=brand)
+            product_name = row[0]
+            product_price = clean_db_price(row[1])
+            product_quantity = row[2]
+            formatted_date = clean_db_date(row[3])
+            date_updated = formatted_date.strftime('%m/%d/%Y')
+            brand_name = row[4]
+            brand = session.query(Brands).filter(Brands.brand_name == brand_name).one_or_none()
+            product_in_db = session.query(Product).filter(Product.product_name == product_name).one_or_none()
+            if product_in_db:
+                if date_updated < product_in_db.date_updated:
+                    product_in_db.product_quantity = product_quantity
+                    product_in_db.product_price = product_price
+                    product_in_db.date_updated = date_updated
+                    product_in_db.brand = brand
+            else:
+                new_product = Product(
+                    product_name=product_name,
+                    product_quantity=product_quantity,
+                    product_price=product_price,
+                    date_updated=date_updated,
+                    brand=brand
+                )
                 session.add(new_product)
         session.commit()
 
@@ -76,12 +88,13 @@ def clean_db_price(price_str):
 
 def clean_db_date(date_str):
     try:
-        fixed_date = datetime.datetime.strptime(date_str, '%m/%d/%Y').date()
+        fixed_date = datetime.strptime(date_str, '%m/%d/%Y').date()
     except ValueError:
         input("""
         \n DATE ERROR
         \r The date format should be MM/DD/YYYY.
         \r Press enter to try again.""")
+        return None
     else:
         return fixed_date
 
@@ -103,25 +116,56 @@ def clean_date():
     while True:
         date_updated = input("Date Updated (MM/DD/YYYY): ")
         try:
-            date = datetime.datetime.strptime(date_updated, '%m/%d/%Y').date()
-            if date > datetime.date.today():
+            date = datetime.strptime(date_updated, '%m/%d/%Y')
+            formatted_date = date.strftime('%m/%d/%Y')
+            if date.date() > datetime.today().date():
                 raise ValueError("Date cannot be in the future. Please enter a valid date.")
-            return date
+            return formatted_date
         except ValueError as e:
             print(f"Date format error: {e}")
 
 
+def check_quantity(quantity_str):
+    while True:
+        if quantity_str == "":
+            quantity_str = input('''
+                       \n QUANTITY ERROR
+                       \r The quantity cannot be empty.
+                       \r Please enter a valid quantity: ''')
+            continue
+        try:
+            quantity_int = int(quantity_str)
+            return quantity_int
+        except ValueError:
+            quantity_str = input('''
+                       \n QUANTITY ERROR
+                       \r The quantity format should be a whole number.
+                       \r Please enter a valid quantity: ''')
+
+
 def clean_user_price(price_str):
-    try:
-        price_float = float(price_str)
-        return int(price_float * 100)
-    except ValueError:
-        input('''
-                \n PRICE ERROR
-                \r The price format should be a number without a currency symbol.
-                \r Ex: 10.99.
-                \r Press enter to try again. ''')
-        return None
+    while True:
+        if price_str == "":
+            price_str = input('''
+                    \n PRICE ERROR
+                    \r The price cannot be empty.
+                    \r Please enter a valid price: ''')
+            continue
+        try:
+            price_float = float(price_str)
+            return int(price_float * 100)
+        except ValueError:
+            price_str = input('''
+                    \n PRICE ERROR
+                    \r The price format should be a number without a currency symbol.
+                    \r Ex: 10.99.
+                    \r Please enter a valid price: ''')
+
+
+def check_product_name(name_str):
+    while name_str == "":
+        name_str = input("Please enter a valid name: ")
+    return name_str
 
 
 def clean_brand_id(brand_id, options):
@@ -141,15 +185,12 @@ def clean_brand_id(brand_id, options):
 
 
 def add_new_product():
-    product_name = input("New Product: ")
-    while True:
-        price = input("New Price: ")
-        try:
-            product_price = clean_user_price(price)
-            break
-        except ValueError:
-            print("Price should be a valid number without a currency symbol. Please try again.")
-    product_quantity = input("New Quantity: ")
+    check_name = input("New Product: ")
+    product_name = check_product_name(check_name)
+    price = input("New Price: ")
+    price = clean_user_price(price)
+    quantity_check = input("New Quantity: ")
+    product_quantity = check_quantity(quantity_check)
     date_updated = clean_date()
     id_error = True
     while id_error:
@@ -176,7 +217,7 @@ def add_new_product():
             new_product = Product(
                 product_name=product_name,
                 product_quantity=product_quantity,
-                product_price=product_price,
+                product_price=price,
                 date_updated=date_updated,
                 brand=brand
                 )
@@ -218,6 +259,14 @@ def edit_product_check(column_name, current_value):
                 if not brand:
                     raise ValueError("Invalid Brand ID. Please choose a valid ID.")
                 return brand_id
+            elif column_name == "Quantity":
+                updated_value = check_quantity(updated_value)
+                if updated_value is not None:
+                    return updated_value
+            elif column_name == "Product":
+                updated_value = check_product_name(updated_value)
+                if updated_value is not None:
+                    return updated_value
             else:
                 return updated_value
         except ValueError as e:
@@ -319,15 +368,13 @@ def backup_database():
             field = ["product_name", "product_price", "product_quantity", "date_updated", "brand_name"]
             writer.writerow(field)
             products = session.query(Product).all()
-
             for product in products:
                 brand_name = product.brand.brand_name if product.brand else ''
-                formated_date = datetime.datetime.strptime(product.date_updated, "%Y-%m-%d").strftime("%m/%d/%Y")
                 row = [
                     product.product_name,
                     f"${float(product.product_price) / 100:.2f}",
                     product.product_quantity,
-                    formated_date,
+                    product.date_updated,
                     brand_name
                 ]
                 writer.writerow(row)
